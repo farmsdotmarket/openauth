@@ -1,5 +1,3 @@
-import { timingSafeEqual } from "node:crypto"
-
 export function generateUnbiasedDigits(length: number): string {
   const result: number[] = []
   while (result.length < length) {
@@ -20,5 +18,11 @@ export function timingSafeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) {
     return false
   }
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b))
+
+  // Keep runtime-agnostic constant-time behavior for equal-length strings.
+  let mismatch = 0
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return mismatch === 0
 }

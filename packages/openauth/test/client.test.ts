@@ -154,3 +154,24 @@ describe("verify", () => {
     })
   })
 })
+
+describe("issuer safety", () => {
+  test("rejects insecure non-localhost issuer", () => {
+    expect(() =>
+      createClient({
+        issuer: "http://example.com",
+        clientID: "123",
+      }),
+    ).toThrow(
+      "OpenAuth issuer must use https except for localhost/loopback during development",
+    )
+  })
+
+  test("allows localhost issuer over http for development", () => {
+    const client = createClient({
+      issuer: "http://localhost:8787",
+      clientID: "123",
+    })
+    expect(client).toBeDefined()
+  })
+})

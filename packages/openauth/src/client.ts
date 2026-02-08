@@ -539,6 +539,29 @@ export interface Client {
   ): Promise<VerifyResult<T> | VerifyError>
 }
 
+function getEnvIssuer() {
+  if (typeof process === "undefined") return undefined
+  return process.env.OPENAUTH_ISSUER
+}
+
+function validateIssuer(raw: string) {
+  const parsed = new URL(raw)
+  const isLoopback =
+    parsed.hostname === "localhost" ||
+    parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "::1"
+  if (parsed.protocol !== "https:" && !isLoopback) {
+    throw new Error(
+      "OpenAuth issuer must use https except for localhost/loopback during development",
+    )
+  }
+  return parsed.toString().replace(/\/+$/, "")
+}
+
+function validateURI(uri: string) {
+  return new URL(uri).toString()
+}
+
 /**
  * Create an OpenAuth client.
  *
@@ -547,29 +570,30 @@ export interface Client {
 export function createClient(input: ClientInput): Client {
   const jwksCache = new Map<string, ReturnType<typeof createLocalJWKSet>>()
   const issuerCache = new Map<string, WellKnown>()
-  const issuer = input.issuer || process.env.OPENAUTH_ISSUER
+  const issuer = input.issuer || getEnvIssuer()
   if (!issuer) throw new Error("No issuer")
+  const validatedIssuer = validateIssuer(issuer)
   const f = input.fetch ?? fetch
 
   async function getIssuer() {
-    const cached = issuerCache.get(issuer!)
+    const cached = issuerCache.get(validatedIssuer)
     if (cached) return cached
     const wellKnown = (await (f || fetch)(
-      `${issuer}/.well-known/oauth-authorization-server`,
+      `${validatedIssuer}/.well-known/oauth-authorization-server`,
     ).then((r) => r.json())) as WellKnown
-    issuerCache.set(issuer!, wellKnown)
+    issuerCache.set(validatedIssuer, wellKnown)
     return wellKnown
   }
 
   async function getJWKS() {
     const wk = await getIssuer()
-    const cached = jwksCache.get(issuer!)
+    const cached = jwksCache.get(validatedIssuer)
     if (cached) return cached
     const keyset = (await (f || fetch)(wk.jwks_uri).then((r) =>
       r.json(),
     )) as JSONWebKeySet
     const result = createLocalJWKSet(keyset)
-    jwksCache.set(issuer!, result)
+    jwksCache.set(validatedIssuer, result)
     return result
   }
 
@@ -579,12 +603,13 @@ export function createClient(input: ClientInput): Client {
       response: "code" | "token",
       opts?: AuthorizeOptions,
     ) {
-      const result = new URL(issuer + "/authorize")
+      const parsedRedirect = validateURI(redirectURI)
+      const result = new URL(validatedIssuer + "/authorize")
       const challenge: Challenge = {
         state: crypto.randomUUID(),
       }
       result.searchParams.set("client_id", input.clientID)
-      result.searchParams.set("redirect_uri", redirectURI)
+      result.searchParams.set("redirect_uri", parsedRedirect)
       result.searchParams.set("response_type", response)
       result.searchParams.set("state", challenge.state)
       if (opts?.provider) result.searchParams.set("provider", opts.provider)
@@ -608,10 +633,11 @@ export function createClient(input: ClientInput): Client {
         provider?: string
       },
     ) {
-      const result = new URL(issuer + "/authorize")
+      const parsedRedirect = validateURI(redirectURI)
+      const result = new URL(validatedIssuer + "/authorize")
       if (opts?.provider) result.searchParams.set("provider", opts.provider)
       result.searchParams.set("client_id", input.clientID)
-      result.searchParams.set("redirect_uri", redirectURI)
+      result.searchParams.set("redirect_uri", parsedRedirect)
       result.searchParams.set("response_type", "code")
       const pkce = await generatePKCE()
       result.searchParams.set("code_challenge_method", "S256")
@@ -623,14 +649,15 @@ export function createClient(input: ClientInput): Client {
       redirectURI: string,
       verifier?: string,
     ): Promise<ExchangeSuccess | ExchangeError> {
-      const tokens = await f(issuer + "/token", {
+      const parsedRedirect = validateURI(redirectURI)
+      const tokens = await f(validatedIssuer + "/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({
           code,
-          redirect_uri: redirectURI,
+          redirect_uri: parsedRedirect,
           grant_type: "authorization_code",
           client_id: input.clientID,
           code_verifier: verifier || "",
@@ -669,7 +696,7 @@ export function createClient(input: ClientInput): Client {
           }
         }
       }
-      const tokens = await f(issuer + "/token", {
+      const tokens = await f(validatedIssuer + "/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -706,7 +733,7 @@ export function createClient(input: ClientInput): Client {
           type: keyof T
           properties: v1.InferInput<T[keyof T]>
         }>(token, jwks, {
-          issuer,
+          issuer: validatedIssuer,
         })
         const validated = await subjects[result.payload.type][
           "~standard"
@@ -731,7 +758,7 @@ export function createClient(input: ClientInput): Client {
             refreshed.tokens!.access,
             {
               refresh: refreshed.tokens!.refresh,
-              issuer,
+              issuer: validatedIssuer,
               fetch: options?.fetch,
             },
           )
