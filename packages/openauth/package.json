@@ -1,6 +1,6 @@
 {
-  "name": "@openauthjs/openauth",
-  "version": "0.4.3-farms.1",
+  "name": "@farmsdotmarket/openauth",
+  "version": "0.4.8",
   "type": "module",
   "scripts": {
     "build": "bun run script/build.ts",
@@ -22,7 +22,6 @@
       "types": "./dist/types/index.d.ts"
     },
     "./client": {
-      "react-native": "./dist/esm/client-native.js",
       "import": "./dist/esm/client.js",
       "types": "./dist/types/client.d.ts"
     },
@@ -42,7 +41,7 @@
   "dependencies": {
     "@standard-schema/spec": "1.0.0-beta.3",
     "aws4fetch": "1.0.20",
-    "jose": "5.9.6"
+    "jose": "6.1.0"
   },
   "files": [
     "src",
