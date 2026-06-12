@@ -5,9 +5,8 @@ import {
   generateKeyPair,
   importPKCS8,
   importSPKI,
-  JWK,
-  KeyLike,
 } from "jose"
+import type { CryptoKey, JWK, KeyObject } from "jose"
 import { Storage, StorageAdapter } from "./storage/storage.js"
 
 const signingAlg = "ES256"
@@ -25,8 +24,8 @@ interface SerializedKeyPair {
 export interface KeyPair {
   id: string
   alg: string
-  public: KeyLike
-  private: KeyLike
+  public: CryptoKey | KeyObject | JWK | Uint8Array
+  private: CryptoKey | KeyObject | JWK | Uint8Array
   created: Date
   expired?: Date
   jwk: JWK
@@ -96,7 +95,24 @@ export async function signingKeys(storage: StorageAdapter): Promise<KeyPair[]> {
     alg: signingAlg,
   }
   await Storage.set(storage, ["signing:key", serialized.id], serialized)
-  return signingKeys(storage)
+  // Return the generated key directly instead of re-scanning. Storage list
+  // operations are eventually consistent (e.g. Cloudflare KV), so a re-scan
+  // can miss the key we just wrote and mint another one, looping until the
+  // store catches up and polluting it with hundreds of keys.
+  const jwk = await exportJWK(key.publicKey)
+  jwk.kid = serialized.id
+  jwk.use = "sig"
+  return [
+    {
+      id: serialized.id,
+      alg: signingAlg,
+      created: new Date(serialized.created),
+      public: key.publicKey,
+      private: key.privateKey,
+      jwk,
+    },
+    ...results,
+  ]
 }
 
 export async function encryptionKeys(
@@ -135,5 +151,18 @@ export async function encryptionKeys(
     alg: encryptionAlg,
   }
   await Storage.set(storage, ["encryption:key", serialized.id], serialized)
-  return encryptionKeys(storage)
+  // Same as signingKeys: avoid the eventually-consistent re-scan loop.
+  const jwk = await exportJWK(key.publicKey)
+  jwk.kid = serialized.id
+  return [
+    {
+      id: serialized.id,
+      alg: encryptionAlg,
+      created: new Date(serialized.created),
+      public: key.publicKey,
+      private: key.privateKey,
+      jwk,
+    },
+    ...results,
+  ]
 }
